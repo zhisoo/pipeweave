@@ -35,6 +35,13 @@ class PriorityPipelineRunner(PipelineRunner):
         if ctx is None:
             ctx = PipelineContext()
 
+        stage_names = {stage.name for stage in self._pipeline.stages}
+        unknown = set(self._priorities) - stage_names
+        if unknown:
+            raise ValueError(
+                f"Priority mapping references unknown stage(s): {sorted(unknown)}"
+            )
+
         pq = StagePriorityQueue(self._config)
 
         for stage in self._pipeline.stages:
