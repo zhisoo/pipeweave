@@ -21,7 +21,12 @@ async def iter_batches(
     source: AsyncIterator[Any],
     config: BatchConfig,
 ) -> AsyncIterator[List[Any]]:
-    """Yield lists of items from *source* according to *config*."""
+    """Yield lists of items from *source* according to *config*.
+
+    Items are grouped into batches of up to ``config.size`` elements.
+    If ``config.timeout`` is set, a partial batch is flushed when no new item
+    arrives within that many seconds.
+    """
     batch: List[Any] = []
 
     async def _next() -> Any:
@@ -55,8 +60,21 @@ class BatchRunner:
         self._config = config or BatchConfig()
 
     async def run(self, source: AsyncIterator[Any]) -> List[Any]:
+        """Process all batches from *source* and return a list of results."""
         results: List[Any] = []
         async for batch in iter_batches(source, self._config):
             result = await self._fn(batch)
             results.append(result)
+        return results
+
+    async def run_flat(self, source: AsyncIterator[Any]) -> List[Any]:
+        """Like :meth:`run`, but flattens results assuming each call returns a list.
+
+        Useful when *fn* returns a list of processed items per batch and the
+        caller wants a single flat list of all outputs.
+        """
+        results: List[Any] = []
+        async for batch in iter_batches(source, self._config):
+            result = await self._fn(batch)
+            results.extend(result)
         return results
