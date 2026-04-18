@@ -92,3 +92,12 @@ async def test_non_dict_value_skips_dict_ops():
     cfg = TransformConfig(mappings={"x": str}, drop_keys=["x"])
     result = await _run(cfg, "plain string")
     assert result.value == "plain string"
+
+
+@pytest.mark.asyncio
+async def test_rename_missing_key_is_noop():
+    """Renaming a key that doesn't exist in the value should leave the dict unchanged."""
+    cfg = TransformConfig(rename={"missing": "present"})
+    result = await _run(cfg, {"a": 1})
+    assert result.value == {"a": 1}
+    assert "present" not in result.value
