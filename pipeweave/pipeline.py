@@ -42,6 +42,10 @@ class Pipeline:
                 else:
                     result = await coro
                 return result
+            except asyncio.TimeoutError as exc:
+                last_exc = exc
+                if attempt < config.retries:
+                    await asyncio.sleep(config.retry_delay)
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 if attempt < config.retries:
@@ -62,3 +66,12 @@ class Pipeline:
         """Process a stream of items through the full pipeline."""
         async for item in items:
             yield await self.run(item)
+
+    def __len__(self) -> int:
+        """Return the number of stages in the pipeline."""
+        return len(self.stages)
+
+    def __repr__(self) -> str:
+        """Return a readable summary of the pipeline stages."""
+        names = [config.name for config, _ in self.stages]
+        return f"Pipeline(stages={names})"
