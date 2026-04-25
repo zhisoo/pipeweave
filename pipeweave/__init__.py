@@ -1,12 +1,13 @@
 """pipeweave — Lightweight async data transformation pipelines."""
 from pipeweave.pipeline import Pipeline, StageConfig
-from pipeweave.stage import Stage
 from pipeweave.runner import PipelineRunner
 from pipeweave.context import PipelineContext, StageResult
 from pipeweave.errors import PipeweaveError, StageError, PipelineAbortedError
 from pipeweave.retry import RetryPolicy
 from pipeweave.middleware import MiddlewareChain, logging_middleware
 from pipeweave.hooks import HookSet, HookRunner
+from pipeweave.throttle import ThrottleConfig, Throttle
+from pipeweave.stage import Stage
 from pipeweave.metrics import StageMetrics, PipelineMetrics
 from pipeweave.metrics_middleware import (
     get_pipeline_metrics,
@@ -16,7 +17,6 @@ from pipeweave.metrics_middleware import (
 from pipeweave.metrics_runner import MetricsPipelineRunner
 from pipeweave.timeout import TimeoutConfig, timeout_middleware
 from pipeweave.timeout_runner import TimeoutPipelineRunner
-from pipeweave.throttle import ThrottleConfig, Throttle
 from pipeweave.circuit_breaker import (
     CircuitState,
     CircuitBreakerConfig,
@@ -32,51 +32,58 @@ from pipeweave.bulkhead_runner import BulkheadPipelineRunner
 from pipeweave.deadletter import DeadLetterEntry, DeadLetterQueue
 from pipeweave.checkpoint import CheckpointStore
 from pipeweave.sampling import SamplingConfig, make_sampling_middleware
-from pipeweave.priority_queue import PriorityQueueConfig, StagePriorityQueue
+from pipeweave.priority_queue import (
+    PriorityQueueConfig,
+    StagePriorityQueue,
+    PriorityQueueError,
+)
 from pipeweave.priority_runner import PriorityPipelineRunner
 from pipeweave.batch import BatchConfig, BatchRunner
 from pipeweave.batch_runner import BatchPipelineRunner
 from pipeweave.debounce import DebounceConfig, Debouncer
 from pipeweave.backpressure import BackpressureConfig, BackpressureController
-from pipeweave.fanout import FanoutConfig, make_fanout_middleware
-from pipeweave.scatter_gather import ScatterGatherConfig
+from pipeweave.fanout import FanoutConfig, make_fanout_middleware, FanoutError
+from pipeweave.scatter_gather import ScatterGatherConfig, ScatterGatherError
 from pipeweave.tap import TapConfig, make_tap_middleware
 from pipeweave.tap_runner import TapPipelineRunner
 from pipeweave.transform import TransformConfig, make_transform_middleware
 from pipeweave.transform_runner import TransformPipelineRunner
 from pipeweave.window import WindowConfig, WindowBuffer
 from pipeweave.hedge import HedgeConfig, make_hedge_middleware
-from pipeweave.splitter import SplitterConfig, SplitterRoute
+from pipeweave.splitter import SplitterConfig, SplitterRoute, SplitterError
 from pipeweave.splitter_runner import SplitterPipelineRunner
-from pipeweave.aggregator import AggregatorConfig, Aggregator
+from pipeweave.aggregator import AggregatorConfig, Aggregator, AggregatorError
 from pipeweave.aggregator_runner import AggregatorPipelineRunner
-from pipeweave.replay import ReplayConfig, ReplayBuffer
+from pipeweave.replay import ReplayConfig, ReplayBuffer, ReplayEntry
 from pipeweave.replay_runner import ReplayPipelineRunner
 from pipeweave.semaphore import SemaphoreConfig, SemaphorePool
 from pipeweave.semaphore_runner import SemaphorePipelineRunner
-from pipeweave.tracing import SpanConfig, Span, TraceContext, make_tracing_middleware
+from pipeweave.tracing import SpanConfig, Span, TracingConfig
 from pipeweave.tracing_runner import TracingPipelineRunner
+from pipeweave.snapshot import SnapshotConfig, PipelineSnapshot, SnapshotError
+from pipeweave.event_bus import EventBusConfig, EventBus
+from pipeweave.event_bus_runner import EventBusPipelineRunner
+from pipeweave.signal import CancellationSignal, SignalConfig, SignalReason
+from pipeweave.signal_runner import SignalPipelineRunner
 
 __all__ = [
     # core
     "Pipeline",
     "StageConfig",
-    "Stage",
     "PipelineRunner",
     "PipelineContext",
     "StageResult",
-    # errors
     "PipeweaveError",
     "StageError",
     "PipelineAbortedError",
-    # retry
     "RetryPolicy",
-    # middleware
     "MiddlewareChain",
     "logging_middleware",
-    # hooks
     "HookSet",
     "HookRunner",
+    "ThrottleConfig",
+    "Throttle",
+    "Stage",
     # metrics
     "StageMetrics",
     "PipelineMetrics",
@@ -88,9 +95,6 @@ __all__ = [
     "TimeoutConfig",
     "timeout_middleware",
     "TimeoutPipelineRunner",
-    # throttle
-    "ThrottleConfig",
-    "Throttle",
     # circuit breaker
     "CircuitState",
     "CircuitBreakerConfig",
@@ -119,9 +123,10 @@ __all__ = [
     # sampling
     "SamplingConfig",
     "make_sampling_middleware",
-    # priority
+    # priority queue
     "PriorityQueueConfig",
     "StagePriorityQueue",
+    "PriorityQueueError",
     "PriorityPipelineRunner",
     # batch
     "BatchConfig",
@@ -136,8 +141,10 @@ __all__ = [
     # fanout
     "FanoutConfig",
     "make_fanout_middleware",
+    "FanoutError",
     # scatter-gather
     "ScatterGatherConfig",
+    "ScatterGatherError",
     # tap
     "TapConfig",
     "make_tap_middleware",
@@ -155,14 +162,17 @@ __all__ = [
     # splitter
     "SplitterConfig",
     "SplitterRoute",
+    "SplitterError",
     "SplitterPipelineRunner",
     # aggregator
     "AggregatorConfig",
     "Aggregator",
+    "AggregatorError",
     "AggregatorPipelineRunner",
     # replay
     "ReplayConfig",
     "ReplayBuffer",
+    "ReplayEntry",
     "ReplayPipelineRunner",
     # semaphore
     "SemaphoreConfig",
@@ -171,7 +181,19 @@ __all__ = [
     # tracing
     "SpanConfig",
     "Span",
-    "TraceContext",
-    "make_tracing_middleware",
+    "TracingConfig",
     "TracingPipelineRunner",
+    # snapshot
+    "SnapshotConfig",
+    "PipelineSnapshot",
+    "SnapshotError",
+    # event bus
+    "EventBusConfig",
+    "EventBus",
+    "EventBusPipelineRunner",
+    # signal / cancellation
+    "CancellationSignal",
+    "SignalConfig",
+    "SignalReason",
+    "SignalPipelineRunner",
 ]
